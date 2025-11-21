@@ -780,11 +780,12 @@ impl<'s> DocGen<'s> for Element<'s> {
             && let Some(text_node) = single_text_node
             && matches!(lang_attr, Some(lang) if lang.eq_ignore_ascii_case("json"))
         {
-            docs.push(Doc::line_or_nil());
+            docs.push(Doc::hard_line());
             docs.extend(reflow_owned(
                 ctx.format_json(&text_node.raw, text_node.start, &state)
                     .trim(),
             ));
+            docs.push(Doc::hard_line());
         } else if matches!(ctx.language, Language::Vue)
             && is_root
             && !tag_name.eq_ignore_ascii_case("template")
@@ -1958,7 +1959,7 @@ impl<'s> DocGen<'s> for VueDirective<'s> {
                     ctx.try_format_expr(&code, true, value_start)
                         .unwrap_or_else(|_| {
                             let formatted = ctx
-                                .format_script(&code, "ts", value_start, state)
+                                .format_script(&code, "ts", value_start, &state)
                                 .trim()
                                 .to_owned();
                             if formatted.contains('\n') {
@@ -1989,14 +1990,14 @@ impl<'s> DocGen<'s> for VueDirective<'s> {
 }
 
 impl<'s> DocGen<'s> for VueInterpolation<'s> {
-    fn doc<E, F>(&self, ctx: &mut Ctx<'s, E, F>, _: &State<'s>) -> Doc<'s>
+    fn doc<E, F>(&self, ctx: &mut Ctx<'s, E, F>, state: &State<'s>) -> Doc<'s>
     where
         F: for<'a> FnMut(&'a str, Hints) -> Result<Cow<'a, str>, E>,
     {
         Doc::text("{{")
             .append(Doc::line_or_space())
             .concat(reflow_with_indent(
-                &ctx.format_expr(self.expr, false, self.start),
+                &ctx.format_expr_with_indent(self.expr, false, self.start, state.indent_level + 1),
                 true,
             ))
             .nest(ctx.indent_width)

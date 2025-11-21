@@ -13,4 +13,5 @@ assertion_line: 23
     "hello": "Bonjour",
     "long_text": "Ceci est un long texte qui devrait revenir à la ligne suivante. Pour être sûr qu'il le fasse, nous le rendons un peu plus long, en étirant vraiment la ligne."
   }
-}</i18n>
+}
+</i18n>

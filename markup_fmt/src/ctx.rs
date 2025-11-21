@@ -130,11 +130,31 @@ where
         }
     }
 
+    pub(crate) fn format_expr_with_indent(&mut self, code: &str, attr: bool, start: usize, indent_level: u16) -> String {
+        match self.try_format_expr_with_indent(code, attr, start, indent_level) {
+            Ok(formatted) => formatted,
+            Err(e) => {
+                self.external_formatter_errors.push(e);
+                code.to_owned()
+            }
+        }
+    }
+
     pub(crate) fn try_format_expr(
         &mut self,
         code: &str,
         attr: bool,
         start: usize,
+    ) -> Result<String, E> {
+        self.try_format_expr_with_indent(code, attr, start, 0)
+    }
+
+    pub(crate) fn try_format_expr_with_indent(
+        &mut self,
+        code: &str,
+        attr: bool,
+        start: usize,
+        indent_level: u16,
     ) -> Result<String, E> {
         if code.trim().is_empty() {
             Ok(String::new())
@@ -160,7 +180,7 @@ where
             let formatted = self.try_format_with_external_formatter(
                 wrapped,
                 Hints {
-                    print_width: self.print_width,
+                    print_width: self.print_width.saturating_sub(indent_level as usize * self.indent_width),
                     indent_level: 0,
                     attr,
                     ext: "tsx",
