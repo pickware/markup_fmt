@@ -19,23 +19,16 @@ jobs:
       - run: |
           cargo build --release -p dprint_plugin_markup --target wasm32-unknown-unknown
           cp target/wasm32-unknown-unknown/release/dprint_plugin_markup.wasm dprint_plugin/deployment/plugin.wasm
+      - name: Validate version
+        run: |
+          bash dprint_plugin/deployment/validate-version.sh
+      - name: Generate latest.json
+        run: |
+          bash dprint_plugin/deployment/generate-latest-json.sh
       - name: Publish dprint plugin
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dprint_plugin/deployment/plugin.wasm
             dprint_plugin/deployment/schema.json
-      - uses: rust-lang/crates-io-auth-action@v1
-        id: cratesio-auth
-      - name: Publish crates
-        run: cargo publish -p markup_fmt
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}
-      - uses: actions/setup-node@v4
-        with:
-          registry-url: "https://registry.npmjs.org"
-      - name: Publish npm package
-        run: |
-          cp target/wasm32-unknown-unknown/release/dprint_plugin_markup.wasm dprint_plugin/deployment/npm/plugin.wasm
-          cd dprint_plugin/deployment/npm
-          npx npm@latest publish
+            dprint_plugin/deployment/latest.json

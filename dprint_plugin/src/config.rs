@@ -409,6 +409,23 @@ pub(crate) fn resolve_config(
                 "dprint-ignore-file".into(),
                 &mut diagnostics,
             ),
+            vue_custom_tag_handling: match &*get_value(
+                &mut config,
+                "vue.customTagHandling",
+                "asText".to_string(),
+                &mut diagnostics,
+            ) {
+                "ignore" => VueCustomTagHandling::Ignore,
+                "asText" => VueCustomTagHandling::AsText,
+                "respectLang" => VueCustomTagHandling::RespectLang,
+                _ => {
+                    diagnostics.push(ConfigurationDiagnostic {
+                        property_name: "vue.customTagHandling".into(),
+                        message: "invalid value for config `vue.customTagHandling`".into(),
+                    });
+                    VueCustomTagHandling::AsText
+                }
+            },
         },
     };
 

@@ -231,6 +231,22 @@ pub struct LanguageOptions {
 
     #[cfg_attr(feature = "config_serde", serde(alias = "ignoreFileCommentDirective"))]
     pub ignore_file_comment_directive: String,
+
+    #[cfg_attr(feature = "config_serde", serde(alias = "vue.customTagHandling"))]
+    pub vue_custom_tag_handling: VueCustomTagHandling,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "config_serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "config_serde", serde(rename_all = "kebab-case"))]
+pub enum VueCustomTagHandling {
+    #[default]
+    #[cfg_attr(feature = "config_serde", serde(alias = "asText"))]
+    AsText,
+    #[cfg_attr(feature = "config_serde", serde(alias = "ignore"))]
+    Ignore,
+    #[cfg_attr(feature = "config_serde", serde(alias = "respectLang"))]
+    RespectLang,
 }
 
 impl Default for LanguageOptions {
@@ -278,6 +294,7 @@ impl Default for LanguageOptions {
             script_formatter: None,
             ignore_comment_directive: "markup-fmt-ignore".into(),
             ignore_file_comment_directive: "markup-fmt-ignore-file".into(),
+            vue_custom_tag_handling: VueCustomTagHandling::default(),
         }
     }
 }

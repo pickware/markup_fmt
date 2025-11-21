@@ -385,6 +385,25 @@
       "description": "Text directive for ignoring formatting a whole file.",
       "type": "string",
       "default": "dprint-ignore-file"
+    },
+    "vue.customTagHandling": {
+      "description": "Control how to handle custom tags.",
+      "type": "string",
+      "default": "asText",
+      "oneOf": [
+        {
+          "const": "asText",
+          "description": "Treat content of custom tags as text."
+        },
+        {
+          "const": "ignore",
+          "description": "Do not format content of custom tags."
+        },
+        {
+          "const": "respectLang",
+          "description": "Respect the `lang` attribute of the custom tag."
+        }
+      ]
     }
   }
 }

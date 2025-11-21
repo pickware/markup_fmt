@@ -1,0 +1,19 @@
+---
+source: markup_fmt/tests/fmt.rs
+assertion_line: 23
+---
+<template></template>
+<i18n
+  lang="json"
+>
+{
+  "en": {
+    "hello": "Hello",
+    "long_text": "This is a long text that should be wrapped to the next line. In case it does not, we make it a little longer, really stretching the line."
+  },
+  "fr": {
+    "hello": "Bonjour",
+    "long_text": "Ceci est un long texte qui devrait revenir à la ligne suivante. Pour être sûr qu'il le fasse, nous le rendons un peu plus long, en étirant vraiment la ligne."
+  }
+}
+</i18n>

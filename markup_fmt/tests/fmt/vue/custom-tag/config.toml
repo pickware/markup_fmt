@@ -1,0 +1,7 @@
+[default]
+
+[ignore]
+"vue.customTagHandling" = "ignore"
+
+[respectLang]
+"vue.customTagHandling" = "respectLang"

@@ -589,37 +589,50 @@ impl<'s> DocGen<'s> for Element<'s> {
         let has_two_more_non_text_children =
             has_two_more_non_text_children(&self.children, ctx.language);
 
-        let (leading_ws, trailing_ws) = if is_empty
-            || ctx.language == Language::Xml
-                && matches!(
-                    &*self.children,
-                    [Node {
-                        kind: NodeKind::Text(..),
-                        ..
-                    }]
-                ) {
-            (Doc::nil(), Doc::nil())
-        } else if is_whitespace_sensitive {
-            (
-                format_ws_sensitive_leading_ws(&self.children),
-                format_ws_sensitive_trailing_ws(&self.children),
-            )
-        } else if has_two_more_non_text_children {
-            (Doc::hard_line(), Doc::hard_line())
+        let lang_attr = self
+            .attrs
+            .iter()
+            .filter_map(|v| {
+                if let Attribute::Native(v) = v {
+                    Some(v)
+                } else {
+                    None
+                }
+            })
+            .find(|attr| attr.name.eq_ignore_ascii_case("lang"))
+            .map(|attr| attr.value.map(|(value, _)| value))
+            .flatten();
+
+        let single_text_node = if let [
+            Node {
+                kind: NodeKind::Text(text_node),
+                ..
+            },
+        ] = &self.children[..]
+        {
+            Some(text_node)
         } else {
-            (
-                format_ws_insensitive_leading_ws(&self.children),
-                format_ws_insensitive_trailing_ws(&self.children),
-            )
+            None
         };
 
+        let (leading_ws, trailing_ws) =
+            if is_empty || ctx.language == Language::Xml && single_text_node.is_some() {
+                (Doc::nil(), Doc::nil())
+            } else if is_whitespace_sensitive {
+                (
+                    format_ws_sensitive_leading_ws(&self.children),
+                    format_ws_sensitive_trailing_ws(&self.children),
+                )
+            } else if has_two_more_non_text_children {
+                (Doc::hard_line(), Doc::hard_line())
+            } else {
+                (
+                    format_ws_insensitive_leading_ws(&self.children),
+                    format_ws_insensitive_trailing_ws(&self.children),
+                )
+            };
         if tag_name.eq_ignore_ascii_case("script")
-            && let [
-                Node {
-                    kind: NodeKind::Text(text_node),
-                    ..
-                },
-            ] = &self.children[..]
+            && let Some(text_node) = single_text_node
         {
             if text_node.raw.chars().all(|c| c.is_ascii_whitespace()) {
                 docs.push(Doc::hard_line());
@@ -692,12 +705,7 @@ impl<'s> DocGen<'s> for Element<'s> {
                 );
             }
         } else if tag_name.eq_ignore_ascii_case("style")
-            && let [
-                Node {
-                    kind: NodeKind::Text(text_node),
-                    ..
-                },
-            ] = &self.children[..]
+            && let Some(text_node) = single_text_node
         {
             if text_node.raw.chars().all(|c| c.is_ascii_whitespace()) {
                 docs.push(Doc::hard_line());
@@ -750,13 +758,7 @@ impl<'s> DocGen<'s> for Element<'s> {
             }
         } else if tag_name.eq_ignore_ascii_case("pre") || tag_name.eq_ignore_ascii_case("textarea")
         {
-            if let [
-                Node {
-                    kind: NodeKind::Text(text_node),
-                    ..
-                },
-            ] = &self.children[..]
-            {
+            if let Some(text_node) = single_text_node {
                 docs.extend(reflow_raw(text_node.raw));
             }
         } else if is_empty {
@@ -768,6 +770,30 @@ impl<'s> DocGen<'s> for Element<'s> {
                     ClosingTagLineBreakForEmpty::Never => {}
                 };
             }
+        } else if matches!(ctx.language, Language::Vue)
+            && is_root
+            && !tag_name.eq_ignore_ascii_case("template")
+            && matches!(
+                ctx.options.vue_custom_tag_handling,
+                crate::config::VueCustomTagHandling::RespectLang
+            )
+            && let Some(text_node) = single_text_node
+            && matches!(lang_attr, Some(lang) if lang.eq_ignore_ascii_case("json"))
+        {
+            docs.push(Doc::line_or_nil());
+            docs.extend(reflow_owned(
+                ctx.format_json(&text_node.raw, text_node.start, &state)
+                    .trim(),
+            ));
+        } else if matches!(ctx.language, Language::Vue)
+            && is_root
+            && !tag_name.eq_ignore_ascii_case("template")
+            && matches!(
+                ctx.options.vue_custom_tag_handling,
+                crate::config::VueCustomTagHandling::Ignore
+            )
+        {
+            docs.extend(self.children.iter().map(|child| Doc::text(child.raw)));
         } else if !is_whitespace_sensitive && has_two_more_non_text_children {
             state.indent_level += 1;
             docs.push(leading_ws.nest(ctx.indent_width));
@@ -777,7 +803,7 @@ impl<'s> DocGen<'s> for Element<'s> {
             );
             docs.push(trailing_ws);
         } else if is_whitespace_sensitive
-            && matches!(&self.children[..], [Node { kind: NodeKind::Text(text_node), .. }] if is_all_ascii_whitespace(text_node.raw))
+            && matches!(single_text_node, Some(text_node) if is_all_ascii_whitespace(text_node.raw))
         {
             docs.push(Doc::line_or_space());
         } else {
@@ -816,7 +842,6 @@ impl<'s> DocGen<'s> for Element<'s> {
         }
 
         docs.push(Doc::text(format!("</{formatted_tag_name}>")));
-
         Doc::list(docs).group()
     }
 }

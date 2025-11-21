@@ -1,10 +1,10 @@
 [package]
 name = "dprint_plugin_markup"
-version = "0.24.1"
+version = "0.24.1+pw.1"
 edition = "2024"
 authors = ["Pig Fang <g-plane@hotmail.com>"]
 description = "markup_fmt as dprint plugin."
-repository = "https://github.com/g-plane/markup_fmt"
+repository = "https://github.com/pickware/markup_fmt"
 license = "MIT"
 publish = false
 

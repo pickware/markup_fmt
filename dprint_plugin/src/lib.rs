@@ -21,15 +21,16 @@ pub struct MarkupFmtPluginHandler;
 impl SyncPluginHandler<FormatOptions> for MarkupFmtPluginHandler {
     fn plugin_info(&mut self) -> PluginInfo {
         let version = env!("CARGO_PKG_VERSION").to_string();
+        let repository = env!("CARGO_PKG_REPOSITORY").to_string();
         PluginInfo {
             name: env!("CARGO_PKG_NAME").to_string(),
             version: version.clone(),
             config_key: "markup".to_string(),
-            help_url: "https://github.com/g-plane/markup_fmt".to_string(),
+            help_url: repository.clone(),
             config_schema_url: format!(
-                "https://plugins.dprint.dev/g-plane/markup_fmt/v{version}/schema.json",
+                "{repository}/releases/latest/download/v{version}/schema.json",
             ),
-            update_url: Some("https://plugins.dprint.dev/g-plane/markup_fmt/latest.json".into()),
+            update_url: Some(format!("{repository}/releases/latest/download/latest.json")),
         }
     }
 
