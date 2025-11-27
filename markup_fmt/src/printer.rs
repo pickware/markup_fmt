@@ -778,7 +778,9 @@ impl<'s> DocGen<'s> for Element<'s> {
                 crate::config::VueCustomTagHandling::RespectLang
             )
             && let Some(text_node) = single_text_node
-            && matches!(lang_attr, Some(lang) if lang.eq_ignore_ascii_case("json"))
+            && matches!(lang_attr, Some(lang) if lang.eq_ignore_ascii_case("json")
+                || lang.eq_ignore_ascii_case("jsonc")
+                || lang.eq_ignore_ascii_case("json5"))
         {
             docs.push(Doc::hard_line());
             docs.extend(reflow_owned(
