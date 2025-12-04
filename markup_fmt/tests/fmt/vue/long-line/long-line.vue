@@ -1,32 +1,16 @@
+<template>
 <div><div><div><div>
-
-<template v-else>
-
-
-
+<span>
                     {{
-
                         $t(translationKey, {
-
-                            originalStripeInvoiceNumber: store.activeDunningProcess.originalStripeInvoiceNumber,
-
-                            chargebackStripeInvoiceNumber: store.activeDunningProcess.chargebackStripeInvoiceNumber,
-
-                            reminderPaymentDeadline: dayjs(store.activeDunningProcess.reminderPaymentDeadline).format('L'),
-
-                            deactivationDate: dayjs(store.activeDunningProcess.deactivationDate).format('L'),
-
-                            chargebackInvoiceSentToMails: store.activeDunningProcess.chargebackInvoiceSentToMails.join(', '),
-
-                            unpaidInvoiceReminderSentToMails: store.activeDunningProcess.unpaidInvoiceReminderSentToMails.join(', '),
-
-                            unpaidInvoiceFinalReminderSentToMails: store.activeDunningProcess.unpaidInvoiceFinalReminderSentToMails.join(', '),
-
+                            gymBattles: store.gym.getBattleCount,
+                            pokemonCaughtDate: dayjs(store.pokedex.lastCaughtDate).format('L'),
+                            evolutionDate: dayjs(store.pokemon.evolutionDate).format('L'),
+                            pokemonTypes: store.pokemon.activeTypes.map(type => type.name).filter(type => type !== 'Normal').join(', '),
+                            battlePartners: store.battle.getPartnerNames.join(', '),
+                            leagueChampions: store.league.getChampionNames.join(', '),
                         })
-
                     }}
-
-                </template>
-
+                </span>
 </div></div></div></div>
-
+</template>
