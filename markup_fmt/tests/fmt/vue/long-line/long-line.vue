@@ -1,6 +1,9 @@
 <template>
-<div><div><div><div>
-<span>
+<div>
+    <div>
+        <div>
+            <div>
+                <span>
                     {{
                         $t(translationKey, {
                             gymBattles: store.gym.getBattleCount,
@@ -12,5 +15,8 @@
                         })
                     }}
                 </span>
-</div></div></div></div>
+            </div>
+        </div>
+    </div>
+</div>
 </template>
