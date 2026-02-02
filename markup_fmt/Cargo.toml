@@ -1,9 +1,9 @@
 [package]
 name = "markup_fmt"
-version = "0.24.1+pw.3"
+version = "0.25.3+pw.3"
 edition = "2024"
 authors = ["Pig Fang <g-plane@hotmail.com>"]
-description = "Configurable HTML, Vue, Svelte, Astro, Angular, Jinja, Twig, Nunjucks, Vento, Mustache and XML formatter."
+description = "Configurable HTML, Vue, Svelte, Astro, Angular, Jinja, Twig, Nunjucks, Vento, Mustache, Handlebars and XML formatter."
 repository = "https://github.com/pickware/markup_fmt"
 license = "MIT"
 exclude = ["/tests"]

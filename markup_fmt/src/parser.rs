@@ -138,6 +138,38 @@ impl<'s> Parser<'s> {
         Ok(children)
     }
 
+    fn parse_angular_defer(&mut self) -> PResult<Vec<AngularGenericBlock<'s>>> {
+        if self
+            .chars
+            .next_if(|(_, c)| *c == '@')
+            .and_then(|_| self.chars.next_if(|(_, c)| *c == 'd'))
+            .and_then(|_| self.chars.next_if(|(_, c)| *c == 'e'))
+            .and_then(|_| self.chars.next_if(|(_, c)| *c == 'f'))
+            .and_then(|_| self.chars.next_if(|(_, c)| *c == 'e'))
+            .and_then(|_| self.chars.next_if(|(_, c)| *c == 'r'))
+            .is_none()
+        {
+            return Err(self.emit_error(SyntaxErrorKind::ExpectAngularBlock("defer")));
+        }
+        self.skip_ws();
+        let mut blocks = vec![self.parse_angular_generic_block("defer")?];
+
+        loop {
+            let chars = self.chars.clone();
+            self.skip_ws();
+            if self.chars.next_if(|(_, c)| *c == '@').is_some()
+                && let Ok(name) = self.parse_identifier()
+                && matches!(name, "loading" | "error" | "placeholder")
+            {
+                self.skip_ws();
+                blocks.push(self.parse_angular_generic_block(name)?);
+            } else {
+                self.chars = chars;
+                return Ok(blocks);
+            }
+        }
+    }
+
     fn parse_angular_for(&mut self) -> PResult<AngularFor<'s>> {
         if self
             .chars
@@ -147,7 +179,7 @@ impl<'s> Parser<'s> {
             .and_then(|_| self.chars.next_if(|(_, c)| *c == 'r'))
             .is_none()
         {
-            return Err(self.emit_error(SyntaxErrorKind::ExpectAngularFor));
+            return Err(self.emit_error(SyntaxErrorKind::ExpectAngularBlock("for")));
         }
         self.skip_ws();
 
@@ -236,6 +268,37 @@ impl<'s> Parser<'s> {
         })
     }
 
+    fn parse_angular_generic_block(
+        &mut self,
+        keyword: &'s str,
+    ) -> PResult<AngularGenericBlock<'s>> {
+        let header = if let Some((start, _)) = self.chars.next_if(|(_, c)| *c == '(') {
+            let mut paren_stack = 0u8;
+            loop {
+                match self.chars.next() {
+                    Some((_, '(')) => paren_stack += 1,
+                    Some((i, ')')) => {
+                        if paren_stack == 0 {
+                            break Some(unsafe { self.source.get_unchecked(start..i + 1) });
+                        } else {
+                            paren_stack -= 1;
+                        }
+                    }
+                    Some(..) => {}
+                    None => return Err(self.emit_error(SyntaxErrorKind::ExpectChar(')'))),
+                }
+            }
+        } else {
+            None
+        };
+        self.skip_ws();
+        Ok(AngularGenericBlock {
+            keyword,
+            header,
+            children: self.parse_angular_control_flow_children()?,
+        })
+    }
+
     fn parse_angular_if(&mut self) -> PResult<AngularIf<'s>> {
         if self
             .chars
@@ -244,7 +307,7 @@ impl<'s> Parser<'s> {
             .and_then(|_| self.chars.next_if(|(_, c)| *c == 'f'))
             .is_none()
         {
-            return Err(self.emit_error(SyntaxErrorKind::ExpectAngularIf));
+            return Err(self.emit_error(SyntaxErrorKind::ExpectAngularBlock("if")));
         }
         self.skip_ws();
 
@@ -1449,35 +1512,77 @@ impl<'s> Parser<'s> {
     }
 
     fn parse_mustache_block_or_interpolation(&mut self) -> PResult<NodeKind<'s>> {
-        let (content, _) = self.parse_mustache_interpolation()?;
+        let mut controls = vec![];
+        let (raw, _) = self.parse_mustache_interpolation()?;
+        let (content, wc_before, wc_after) = strip_hbs_whitespace_control(raw);
         if let Some((prefix, rest)) = content
             .split_at_checked(1)
             .filter(|(c, _)| matches!(*c, "#" | "^" | "$" | "<"))
         {
+            let (prefix, rest) = if rest.strip_prefix(['>', '*']).is_some() {
+                content.split_at(2)
+            } else {
+                (prefix, rest)
+            };
             let trimmed_rest = rest.trim_ascii();
-            let mut children = vec![];
+            let (block_name, rest) = if let Some((name, rest)) =
+                trimmed_rest.split_once(|c: char| c.is_ascii_whitespace())
+            {
+                (name, Some(rest))
+            } else {
+                (trimmed_rest, None)
+            };
+            controls.push(MustacheBlockControl {
+                name: block_name,
+                prefix,
+                content: rest,
+                wc_before,
+                wc_after,
+            });
+            let mut children = vec![vec![]];
             loop {
                 let chars = self.chars.clone();
-                if self
-                    .parse_mustache_interpolation()
-                    .ok()
-                    .and_then(|(content, _)| content.strip_prefix('/'))
-                    .is_some_and(|s| s.trim_ascii() == trimmed_rest)
+                if let Some((content, _)) = self.parse_mustache_interpolation().ok()
+                    && let (content, wc_before, wc_after) = strip_hbs_whitespace_control(content)
+                    && content
+                        .strip_prefix('/')
+                        .is_some_and(|s| s.trim_ascii() == block_name)
                 {
+                    controls.push(MustacheBlockControl {
+                        name: block_name,
+                        prefix: "/",
+                        content: None,
+                        wc_before,
+                        wc_after,
+                    });
                     break;
                 } else {
                     self.chars = chars;
                 }
-                children.push(self.parse_node()?);
+                let node = self.parse_node()?;
+                if let NodeKind::MustacheInterpolation(interpolation) = &node.kind
+                    && let ("else", wc_before, wc_after) =
+                        strip_hbs_whitespace_control(interpolation.content)
+                {
+                    controls.push(MustacheBlockControl {
+                        name: "else",
+                        prefix: "",
+                        content: None,
+                        wc_before,
+                        wc_after,
+                    });
+                    children.push(vec![]);
+                } else if let Some(nodes) = children.last_mut() {
+                    nodes.push(node);
+                }
             }
             Ok(NodeKind::MustacheBlock(MustacheBlock {
-                prefix,
-                content: rest,
+                controls,
                 children,
             }))
         } else {
             Ok(NodeKind::MustacheInterpolation(MustacheInterpolation {
-                content,
+                content: raw,
             }))
         }
     }
@@ -1677,6 +1782,9 @@ impl<'s> Parser<'s> {
                     Some((_, 'f')) => self.parse_angular_for().map(NodeKind::AngularFor),
                     Some((_, 's')) => self.parse_angular_switch().map(NodeKind::AngularSwitch),
                     Some((_, 'l')) => self.parse_angular_let().map(NodeKind::AngularLet),
+                    Some((_, 'd')) => self
+                        .parse_angular_defer()
+                        .map(NodeKind::AngularGenericBlocks),
                     _ => self.parse_text_node().map(NodeKind::Text),
                 }
             }
@@ -2874,6 +2982,20 @@ fn is_vento_interpolation(tag_name: &str) -> bool {
             | "import"
             | "export"
     )
+}
+
+fn strip_hbs_whitespace_control(text: &str) -> (&str, bool, bool) {
+    let (text, before) = if let Some(stripped) = text.strip_prefix('~') {
+        (stripped, true)
+    } else {
+        (text, false)
+    };
+    let (text, after) = if let Some(stripped) = text.strip_suffix('~') {
+        (stripped, true)
+    } else {
+        (text, false)
+    };
+    (text, before, after)
 }
 
 pub type PResult<T> = Result<T, SyntaxError>;

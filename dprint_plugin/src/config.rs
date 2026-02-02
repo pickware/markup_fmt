@@ -448,6 +448,8 @@ pub(crate) fn resolve_config(
                 "vto",
                 "component.html",
                 "mustache",
+                "hbs",
+                "handlebars",
                 "xml",
                 "svg",
                 "wsdl",

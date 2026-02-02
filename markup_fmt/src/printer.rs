@@ -85,6 +85,49 @@ impl<'s> DocGen<'s> for AngularFor<'s> {
     }
 }
 
+impl<'s> DocGen<'s> for AngularGenericBlock<'s> {
+    fn doc<E, F>(&self, ctx: &mut Ctx<'s, E, F>, state: &State<'s>) -> Doc<'s>
+    where
+        F: for<'a> FnMut(&'a str, Hints) -> Result<Cow<'a, str>, E>,
+    {
+        let mut docs = Vec::with_capacity(5);
+        docs.push(Doc::text("@"));
+        docs.push(Doc::text(self.keyword));
+        if let Some(header) = self.header {
+            docs.push(Doc::space());
+            docs.push(Doc::text(header));
+        }
+        docs.push(Doc::text(" {"));
+        docs.push(format_control_structure_block_children(
+            &self.children,
+            ctx,
+            state,
+        ));
+        docs.push(Doc::text("}"));
+        Doc::list(docs)
+    }
+}
+
+impl<'s> DocGen<'s> for Vec<AngularGenericBlock<'s>> {
+    fn doc<E, F>(&self, ctx: &mut Ctx<'s, E, F>, state: &State<'s>) -> Doc<'s>
+    where
+        F: for<'a> FnMut(&'a str, Hints) -> Result<Cow<'a, str>, E>,
+    {
+        let next_block_ws = if ctx.options.angular_next_control_flow_same_line {
+            Doc::space()
+        } else {
+            Doc::hard_line()
+        };
+        Doc::list(
+            itertools::intersperse(
+                self.iter().map(|block| block.doc(ctx, state)),
+                next_block_ws,
+            )
+            .collect(),
+        )
+    }
+}
+
 impl<'s> DocGen<'s> for AngularIf<'s> {
     fn doc<E, F>(&self, ctx: &mut Ctx<'s, E, F>, state: &State<'s>) -> Doc<'s>
     where
@@ -215,12 +258,14 @@ impl<'s> DocGen<'s> for AstroAttribute<'s> {
             .concat(reflow_with_indent(&expr_code, true))
             .append(Doc::text("}"));
         if let Some(name) = self.name {
-            if (matches!(ctx.options.astro_attr_shorthand, Some(true))) && name == expr_code {
+            if matches!(ctx.options.astro_attr_shorthand, Some(true)) && name == expr_code {
                 expr
             } else {
                 Doc::text(name).append(Doc::text("=")).append(expr)
             }
-        } else if matches!(ctx.options.astro_attr_shorthand, Some(false)) {
+        } else if matches!(ctx.options.astro_attr_shorthand, Some(false))
+            && !expr_code.starts_with("...")
+        {
             Doc::text(expr_code.clone())
                 .append(Doc::text("="))
                 .append(expr)
@@ -740,7 +785,7 @@ impl<'s> DocGen<'s> for Element<'s> {
                                 "{{{{ {} }}}}",
                                 ctx.format_expr(expr, false, *start),
                             )),
-                            Language::Mustache => Cow::from(format!("{{{{ {expr} }}}}")),
+                            Language::Mustache => Cow::from(format!("{{{{{expr}}}}}")),
                             _ => unreachable!(),
                         }))
                         .collect::<String>()
@@ -993,27 +1038,34 @@ impl<'s> DocGen<'s> for MustacheBlock<'s> {
     where
         F: for<'a> FnMut(&'a str, Hints) -> Result<Cow<'a, str>, E>,
     {
-        let content = self.content.trim_ascii();
-        Doc::text("{{")
-            .append(Doc::text(self.prefix))
-            .concat(reflow_raw(content))
-            .nest(ctx.indent_width)
-            .append(Doc::line_or_nil())
-            .append(Doc::text("}}"))
-            .group()
-            .append(format_control_structure_block_children(
-                &self.children,
-                ctx,
-                state,
-            ))
-            .group()
-            .append(
-                Doc::text("{{/")
-                    .concat(reflow_raw(content))
-                    .append(Doc::line_or_nil())
-                    .append(Doc::text("}}"))
-                    .group(),
-            )
+        Doc::list(
+            self.controls
+                .iter()
+                .map(|control| {
+                    let mut docs = Vec::with_capacity(3);
+                    docs.push(Doc::text("{{"));
+                    if control.wc_before {
+                        docs.push(Doc::text("~"));
+                    }
+                    docs.push(Doc::text(control.prefix));
+                    docs.push(Doc::text(control.name));
+                    if let Some(content) = control.content {
+                        docs.push(Doc::space());
+                        docs.extend(reflow_raw(content.trim_ascii()));
+                    }
+                    if control.wc_after {
+                        docs.push(Doc::text("~"));
+                    }
+                    docs.push(Doc::text("}}"));
+                    Doc::list(docs)
+                })
+                .interleave(
+                    self.children
+                        .iter()
+                        .map(|nodes| format_control_structure_block_children(nodes, ctx, state)),
+                )
+                .collect(),
+        )
     }
 }
 
@@ -1109,7 +1161,16 @@ impl<'s> DocGen<'s> for NativeAttribute<'s> {
                 {
                     Cow::from(ctx.format_expr(value, false, value_start))
                 }
-                _ => Cow::from(value),
+                _ => {
+                    if !matches!(ctx.language, Language::Angular | Language::Xml)
+                        && self.name.starts_with("on")
+                    {
+                        ctx.try_format_expr(value, true, value_start)
+                            .map_or_else(|_| Cow::from(value), Cow::from)
+                    } else {
+                        Cow::from(value)
+                    }
+                }
             };
             let quote;
             let mut docs = Vec::with_capacity(5);
@@ -1160,7 +1221,7 @@ impl<'s> DocGen<'s> for NativeAttribute<'s> {
                                 "{{{{ {} }}}}",
                                 ctx.format_expr(expr, true, *start),
                             )),
-                            Language::Mustache => Cow::from(format!("{{{{ {expr} }}}}")),
+                            Language::Mustache => Cow::from(format!("{{{{{expr}}}}}")),
                             _ => unreachable!(),
                         }))
                         .collect::<String>(),
@@ -1199,6 +1260,7 @@ impl<'s> DocGen<'s> for NodeKind<'s> {
     {
         match self {
             NodeKind::AngularFor(angular_for) => angular_for.doc(ctx, state),
+            NodeKind::AngularGenericBlocks(blocks) => blocks.doc(ctx, state),
             NodeKind::AngularIf(angular_if) => angular_if.doc(ctx, state),
             NodeKind::AngularInterpolation(angular_interpolation) => {
                 angular_interpolation.doc(ctx, state)
