@@ -109,6 +109,7 @@ pub enum Attribute<'s> {
     JinjaBlock(JinjaBlock<'s, Attribute<'s>>),
     JinjaComment(JinjaComment<'s>),
     JinjaTag(JinjaTag<'s>),
+    JsComment(JsComment<'s>),
     Native(NativeAttribute<'s>),
     Svelte(SvelteAttribute<'s>),
     SvelteAttachment(SvelteAttachment<'s>),
@@ -186,6 +187,8 @@ pub struct JinjaComment<'s> {
 pub struct JinjaInterpolation<'s> {
     pub expr: &'s str,
     pub start: usize,
+    pub trim_prev: bool,
+    pub trim_next: bool,
 }
 
 #[derive(Debug)]
@@ -201,6 +204,12 @@ pub struct JinjaTag<'s> {
 pub enum JinjaTagOrChildren<'s, T> {
     Tag(JinjaTag<'s>),
     Children(Vec<T>),
+}
+
+#[derive(Debug)]
+pub struct JsComment<'s> {
+    pub block: bool,
+    pub raw: &'s str,
 }
 
 #[derive(Debug)]
@@ -437,6 +446,8 @@ pub struct VentoEval<'s> {
 pub struct VentoInterpolation<'s> {
     pub expr: &'s str,
     pub start: usize,
+    pub trim_prev: bool,
+    pub trim_next: bool,
 }
 
 #[derive(Debug)]

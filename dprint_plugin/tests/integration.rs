@@ -10,7 +10,7 @@ use std::{borrow::Cow, fs, io, path::Path};
 
 #[test]
 fn integration_with_dprint_ts_snapshot() {
-    fn format_with_dprint_ts(input: &str, path: &Path) -> Result<String, FormatError<Error>> {
+    fn format_with_dprint_ts(input: &str, path: &Path) -> Result<String, FormatError> {
         let mut options = match fs::read_to_string(path.with_extension("toml")) {
             Ok(file) => toml::from_str::<FormatOptions>(&file).unwrap(),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Default::default(),
@@ -36,7 +36,7 @@ fn integration_with_dprint_ts_snapshot() {
                     indent_width: Some(options.layout.indent_width as u8),
                     ..Default::default()
                 };
-                if let Some(syntax) = malva::detect_syntax(&Path::new("file").with_extension(ext)) {
+                if let Some(syntax) = malva::detect_syntax(Path::new("file").with_extension(ext)) {
                     malva::format_text(
                         code,
                         syntax,
