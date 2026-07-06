@@ -34,6 +34,13 @@ pub struct AngularElseIf<'s> {
 }
 
 #[derive(Debug)]
+pub struct AngularGenericBlock<'s> {
+    pub keyword: &'s str,
+    pub header: Option<&'s str>,
+    pub children: Vec<Node<'s>>,
+}
+
+#[derive(Debug)]
 /// Angular interpolation: `{{ expression }}`.
 ///
 /// See https://angular.dev/guide/templates/binding#render-dynamic-text-with-text-interpolation.
@@ -102,6 +109,7 @@ pub enum Attribute<'s> {
     JinjaBlock(JinjaBlock<'s, Attribute<'s>>),
     JinjaComment(JinjaComment<'s>),
     JinjaTag(JinjaTag<'s>),
+    JsComment(JsComment<'s>),
     Native(NativeAttribute<'s>),
     Svelte(SvelteAttribute<'s>),
     SvelteAttachment(SvelteAttachment<'s>),
@@ -179,6 +187,8 @@ pub struct JinjaComment<'s> {
 pub struct JinjaInterpolation<'s> {
     pub expr: &'s str,
     pub start: usize,
+    pub trim_prev: bool,
+    pub trim_next: bool,
 }
 
 #[derive(Debug)]
@@ -197,13 +207,27 @@ pub enum JinjaTagOrChildren<'s, T> {
 }
 
 #[derive(Debug)]
+pub struct JsComment<'s> {
+    pub block: bool,
+    pub raw: &'s str,
+}
+
+#[derive(Debug)]
 /// Mustache block: `{{#variable}}{{/variable}}`.
 ///
 /// See https://mustache.github.io/mustache.5.html
 pub struct MustacheBlock<'s> {
+    pub controls: Vec<MustacheBlockControl<'s>>,
+    pub children: Vec<Vec<Node<'s>>>,
+}
+
+#[derive(Debug)]
+pub struct MustacheBlockControl<'s> {
+    pub name: &'s str,
     pub prefix: &'s str,
-    pub content: &'s str,
-    pub children: Vec<Node<'s>>,
+    pub content: Option<&'s str>,
+    pub wc_before: bool,
+    pub wc_after: bool,
 }
 
 #[derive(Debug)]
@@ -233,6 +257,7 @@ pub struct Node<'s> {
 #[derive(Debug)]
 pub enum NodeKind<'s> {
     AngularFor(AngularFor<'s>),
+    AngularGenericBlocks(Vec<AngularGenericBlock<'s>>),
     AngularIf(AngularIf<'s>),
     AngularInterpolation(AngularInterpolation<'s>),
     AngularLet(AngularLet<'s>),
@@ -421,6 +446,8 @@ pub struct VentoEval<'s> {
 pub struct VentoInterpolation<'s> {
     pub expr: &'s str,
     pub start: usize,
+    pub trim_prev: bool,
+    pub trim_next: bool,
 }
 
 #[derive(Debug)]

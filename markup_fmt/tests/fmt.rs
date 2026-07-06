@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs, path::Path};
 
 #[test]
 fn fmt_snapshot() {
-    let pattern = "fmt/**/*.{html,vue,svelte,astro,jinja,njk,vto,mustache,xml}";
+    let pattern = "fmt/**/*.{html,vue,svelte,astro,jinja,njk,vto,mustache,hbs,xml}";
     glob!(pattern, |path| {
         let input = fs::read_to_string(path).unwrap();
         let language = detect_language(path).unwrap();
@@ -17,7 +17,7 @@ fn fmt_snapshot() {
 
         if let Some(options) = options {
             options.into_iter().for_each(|(option_name, options)| {
-                let output = run_format_test(path, &input, &options, language.clone());
+                let output = run_format_test(path, &input, &options, language);
                 build_settings(path).bind(|| {
                     let name = path.file_stem().unwrap().to_str().unwrap();
                     assert_snapshot!(format!("{name}.{option_name}"), output);
@@ -39,22 +39,17 @@ fn run_format_test(
     options: &FormatOptions,
     language: Language,
 ) -> String {
-    let output = format_text(&input, language.clone(), &options, |code, _| {
-        Ok::<_, ()>(code.into())
-    })
-    .map_err(|err| format!("failed to format '{}': {:?}", path.display(), err))
-    .unwrap();
-    let regression_format = format_text(&output, language, &options, |code, _| {
-        Ok::<_, ()>(code.into())
-    })
-    .map_err(|err| {
-        format!(
-            "syntax error in stability test '{}': {:?}",
-            path.display(),
-            err
-        )
-    })
-    .unwrap();
+    let output = format_text(input, language, options, |code, _| Ok(code.into()))
+        .map_err(|err| format!("failed to format '{}': {:?}", path.display(), err))
+        .unwrap();
+    let regression_format = format_text(&output, language, options, |code, _| Ok(code.into()))
+        .map_err(|err| {
+            format!(
+                "syntax error in stability test '{}': {err:?}",
+                path.display(),
+            )
+        })
+        .unwrap();
     similar_asserts::assert_eq!(
         output,
         regression_format,

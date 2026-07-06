@@ -4,14 +4,20 @@ use crate::{
     helpers,
     state::State,
 };
+use anyhow::Error;
 use memchr::memchr;
-use std::borrow::Cow;
+use regex::{Captures, Regex};
+use std::{borrow::Cow, sync::LazyLock};
 
 const QUOTES: [&str; 3] = ["\"", "\"", "'"];
 
-pub(crate) struct Ctx<'b, E, F>
+static RE_LINE_COLUMN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:[Ll]ine\s*(\d+),?\s*[Cc]ol(?:umn)?\s*(\d+))|:(\d+):(\d+)").unwrap()
+});
+
+pub(crate) struct Ctx<'b, F>
 where
-    F: for<'a> FnMut(&'a str, Hints<'b>) -> Result<Cow<'a, str>, E>,
+    F: for<'a> FnMut(&'a str, Hints<'b>) -> Result<Cow<'a, str>, Error>,
 {
     pub(crate) source: &'b str,
     pub(crate) language: Language,
@@ -19,12 +25,12 @@ where
     pub(crate) print_width: usize,
     pub(crate) options: &'b LanguageOptions,
     pub(crate) external_formatter: F,
-    pub(crate) external_formatter_errors: Vec<E>,
+    pub(crate) external_formatter_errors: Vec<Error>,
 }
 
-impl<'b, E, F> Ctx<'b, E, F>
+impl<'b, F> Ctx<'b, F>
 where
-    F: for<'a> FnMut(&'a str, Hints<'b>) -> Result<Cow<'a, str>, E>,
+    F: for<'a> FnMut(&'a str, Hints<'b>) -> Result<Cow<'a, str>, Error>,
 {
     pub(crate) fn script_indent(&self) -> bool {
         match self.language {
@@ -86,11 +92,11 @@ where
                 matches!(
                     self.options
                         .component_whitespace_sensitivity
-                        .clone()
-                        .unwrap_or(self.options.whitespace_sensitivity.clone()),
+                        .unwrap_or(self.options.whitespace_sensitivity),
                     WhitespaceSensitivity::Css | WhitespaceSensitivity::Strict
                 )
             }
+            Language::Xml => false,
             _ => match self.options.whitespace_sensitivity {
                 WhitespaceSensitivity::Css => {
                     helpers::is_whitespace_sensitive_tag(tag_name, self.language)
@@ -145,7 +151,7 @@ where
         code: &str,
         attr: bool,
         start: usize,
-    ) -> Result<String, E> {
+    ) -> Result<String, Error> {
         self.try_format_expr_with_indent(code, attr, start, 0)
     }
 
@@ -155,27 +161,19 @@ where
         attr: bool,
         start: usize,
         indent_level: u16,
-    ) -> Result<String, E> {
-        if code.trim().is_empty() {
+    ) -> Result<String, Error> {
+        let code = code.trim_ascii();
+        if code.is_empty() {
             Ok(String::new())
         } else {
             // Trim original code before sending it to the external formatter.
             // This makes sure the code will be trimmed
             // though external formatter isn't available.
-            let wrapped = if code.trim_start().starts_with('{') {
-                self.source
-                    .get(0..start.saturating_sub(1))
-                    .unwrap_or_default()
-                    .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                    + "("
-                    + code.trim()
-                    + ")"
+            let will_add_brackets = code.starts_with('{') || code.starts_with("...");
+            let wrapped = if will_add_brackets {
+                &format!("[{code}]")
             } else {
-                self.source
-                    .get(0..start)
-                    .unwrap_or_default()
-                    .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                    + code
+                code
             };
             let formatted = self.try_format_with_external_formatter(
                 wrapped,
@@ -185,50 +183,41 @@ where
                     attr,
                     ext: "tsx",
                 },
+                start,
             )?;
-            let formatted = formatted.trim_matches(|c: char| c.is_ascii_whitespace() || c == ';');
-            let formatted = if code.trim_start().chars().take_while(|c| *c == '(').count()
-                < formatted.chars().take_while(|c| *c == '(').count()
-                && code
-                    .trim_end()
-                    .chars()
-                    .rev()
-                    .take_while(|c| *c == ')')
-                    .count()
-                    < formatted.chars().rev().take_while(|c| *c == ')').count()
-            {
-                formatted
-                    .trim_ascii()
-                    .strip_prefix('(')
-                    .and_then(|s| s.strip_suffix(')'))
-                    .unwrap_or(formatted)
-            } else {
-                formatted
-            };
+            let mut formatted =
+                formatted.trim_matches(|c: char| c.is_ascii_whitespace() || c == ';');
+            // Only strip the wrapping brackets we added ourselves. Stripping
+            // `[` `]` unconditionally would remove array-destructuring brackets
+            // that the external formatter merely exposed by dropping redundant
+            // parentheses (e.g. `([a, b])` -> `[a, b]`), which corrupts Vue
+            // `v-for` bindings into `(a, b)` and changes their semantics.
+            if will_add_brackets {
+                formatted = trim_delim(code, formatted, '[', ']');
+            }
+            formatted = trim_delim(code, formatted, '(', ')');
+            if will_add_brackets {
+                formatted = formatted.trim_ascii_end().trim_end_matches(',');
+            }
             Ok(formatted.trim_ascii().to_owned())
         }
     }
 
     pub(crate) fn format_binding(&mut self, code: &str, start: usize) -> String {
-        if code.trim().is_empty() {
+        let code = code.trim_ascii();
+        if code.is_empty() {
             String::new()
         } else {
-            let wrapped = self
-                .source
-                .get(0..start.saturating_sub(4))
-                .unwrap_or_default()
-                .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                + "let "
-                + code.trim()
-                + " = 0";
+            let wrapped = format!("let {code} = 0");
             let formatted = self.format_with_external_formatter(
-                wrapped,
+                &wrapped,
                 Hints {
                     print_width: self.print_width,
                     indent_level: 0,
                     attr: false,
                     ext: "ts",
                 },
+                start,
             );
             let formatted = formatted.trim_matches(|c: char| c.is_ascii_whitespace() || c == ';');
             formatted
@@ -240,25 +229,20 @@ where
     }
 
     pub(crate) fn format_type_params(&mut self, code: &str, start: usize) -> String {
-        if code.trim().is_empty() {
+        let code = code.trim_ascii();
+        if code.is_empty() {
             String::new()
         } else {
-            let wrapped = self
-                .source
-                .get(0..start.saturating_sub(7))
-                .unwrap_or_default()
-                .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                + "type T<"
-                + code.trim()
-                + "> = 0";
+            let wrapped = format!("type T<{code}> = 0");
             let formatted = self.format_with_external_formatter(
-                wrapped,
+                &wrapped,
                 Hints {
                     print_width: self.print_width,
                     indent_level: 0,
                     attr: true,
                     ext: "ts",
                 },
+                start,
             );
             let formatted = formatted.trim_matches(|c: char| c.is_ascii_whitespace() || c == ';');
             formatted
@@ -272,18 +256,20 @@ where
     }
 
     pub(crate) fn format_stmt_header(&mut self, keyword: &str, code: &str) -> String {
-        if code.trim().is_empty() {
+        let code = code.trim_ascii();
+        if code.is_empty() {
             String::new()
         } else {
             let wrapped = format!("{keyword} ({code}) {{}}");
             let formatted = self.format_with_external_formatter(
-                wrapped,
+                &wrapped,
                 Hints {
                     print_width: self.print_width,
                     indent_level: 0,
                     attr: false,
                     ext: "js",
                 },
+                0,
             );
             formatted
                 .strip_prefix(keyword)
@@ -304,18 +290,31 @@ where
         start: usize,
         state: &State,
     ) -> Cow<'a, str> {
-        self.format_with_external_formatter(
-            self.source
-                .get(0..start)
-                .unwrap_or_default()
-                .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                + code,
+        match self.try_format_script(code, lang, start, state) {
+            Ok(formatted) => formatted,
+            Err(e) => {
+                self.external_formatter_errors.push(e);
+                Cow::from(code)
+            }
+        }
+    }
+
+    pub(crate) fn try_format_script<'a>(
+        &mut self,
+        code: &'a str,
+        lang: &'b str,
+        start: usize,
+        state: &State,
+    ) -> Result<Cow<'a, str>, Error> {
+        self.try_format_with_external_formatter(
+            code,
             Hints {
                 print_width: self.print_width,
                 indent_level: state.indent_level,
                 attr: false,
                 ext: lang,
             },
+            start,
         )
     }
 
@@ -327,14 +326,7 @@ where
         state: &State,
     ) -> Cow<'a, str> {
         self.format_with_external_formatter(
-            "\n".repeat(
-                self.source
-                    .get(0..start)
-                    .unwrap_or_default()
-                    .lines()
-                    .count()
-                    .saturating_sub(1),
-            ) + code,
+            code,
             Hints {
                 print_width: self
                     .print_width
@@ -348,22 +340,20 @@ where
                 attr: false,
                 ext: if lang == "postcss" { "css" } else { lang },
             },
+            start,
         )
     }
 
     pub(crate) fn format_style_attr(&mut self, code: &str, start: usize, state: &State) -> String {
         self.format_with_external_formatter(
-            self.source
-                .get(0..start)
-                .unwrap_or_default()
-                .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                + code,
+            code,
             Hints {
                 print_width: u16::MAX as usize,
                 indent_level: state.indent_level,
                 attr: true,
                 ext: "css",
             },
+            start,
         )
         .trim()
         .to_owned()
@@ -376,11 +366,7 @@ where
         state: &State,
     ) -> Cow<'a, str> {
         self.format_with_external_formatter(
-            self.source
-                .get(0..start)
-                .unwrap_or_default()
-                .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                + code,
+            code,
             Hints {
                 print_width: self
                     .print_width
@@ -394,6 +380,7 @@ where
                 attr: false,
                 ext: "json",
             },
+            start,
         )
     }
 
@@ -405,11 +392,7 @@ where
         state: &State,
     ) -> String {
         self.format_with_external_formatter(
-            self.source
-                .get(0..start)
-                .unwrap_or_default()
-                .replace(|c: char| !c.is_ascii_whitespace(), " ")
-                + code,
+            code,
             Hints {
                 print_width: self
                     .print_width
@@ -422,6 +405,7 @@ where
                     "markup-fmt-jinja-stmt"
                 },
             },
+            start,
         )
         .trim_ascii()
         .to_owned()
@@ -429,12 +413,12 @@ where
 
     fn format_with_external_formatter<'a>(
         &mut self,
-        code: String,
+        code: &'a str,
         hints: Hints<'b>,
+        start: usize,
     ) -> Cow<'a, str> {
-        match (self.external_formatter)(&code, hints) {
-            Ok(Cow::Owned(formatted)) => Cow::from(formatted),
-            Ok(Cow::Borrowed(..)) => Cow::from(code),
+        match self.try_format_with_external_formatter(code, hints, start) {
+            Ok(formatted) => formatted,
             Err(e) => {
                 self.external_formatter_errors.push(e);
                 code.into()
@@ -444,13 +428,45 @@ where
 
     fn try_format_with_external_formatter<'a>(
         &mut self,
-        code: String,
+        code: &'a str,
         hints: Hints<'b>,
-    ) -> Result<Cow<'a, str>, E> {
-        match (self.external_formatter)(&code, hints) {
+        start: usize,
+    ) -> Result<Cow<'a, str>, Error> {
+        match (self.external_formatter)(code, hints) {
             Ok(Cow::Owned(formatted)) => Ok(Cow::from(formatted)),
             Ok(Cow::Borrowed(..)) => Ok(Cow::from(code)),
-            Err(e) => Err(e),
+            Err(e) => {
+                let msg = e.to_string();
+                let (start_line, start_col) = helpers::pos_to_line_col(self.source, start);
+                let msg = RE_LINE_COLUMN
+                    .replace_all(&msg, |captures: &Captures| {
+                        captures
+                            .get(1)
+                            .or_else(|| captures.get(3))
+                            .zip(captures.get(2).or_else(|| captures.get(4)))
+                            .and_then(|(line, col)| {
+                                Some((
+                                    msg.get(..line.start())?,
+                                    msg.get(line.range())
+                                        .and_then(|line| line.parse::<usize>().ok())?,
+                                    msg.get(line.end()..col.start())?,
+                                    msg.get(col.range())
+                                        .and_then(|col| col.parse::<usize>().ok())?,
+                                    msg.get(col.end()..)?,
+                                ))
+                            })
+                            .map(|(prefix, line, mid, col, suffix)| {
+                                format!(
+                                    "{prefix}{}{mid}{}{suffix}",
+                                    (start_line + line).saturating_sub(1),
+                                    start_col + col
+                                )
+                            })
+                            .unwrap_or_else(|| msg.clone())
+                    })
+                    .to_string();
+                Err(Error::msg(msg))
+            }
         }
     }
 }
@@ -464,4 +480,29 @@ pub struct Hints<'s> {
     pub attr: bool,
     /// Fake file extension.
     pub ext: &'s str,
+}
+
+fn trim_delim<'a>(user_input: &str, formatted: &'a str, start: char, end: char) -> &'a str {
+    if user_input
+        .trim_start()
+        .chars()
+        .take_while(|c| *c == start)
+        .count()
+        < formatted.chars().take_while(|c| *c == start).count()
+        && user_input
+            .trim_end()
+            .chars()
+            .rev()
+            .take_while(|c| *c == end)
+            .count()
+            < formatted.chars().rev().take_while(|c| *c == end).count()
+    {
+        formatted
+            .trim_ascii()
+            .strip_prefix(start)
+            .and_then(|s| s.strip_suffix(end))
+            .unwrap_or(formatted)
+    } else {
+        formatted
+    }
 }

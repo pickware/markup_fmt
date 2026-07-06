@@ -1,6 +1,6 @@
 use crate::Language;
 use aho_corasick::AhoCorasick;
-use std::{borrow::Cow, sync::LazyLock};
+use std::{borrow::Cow, cmp::Ordering, ops::ControlFlow, sync::LazyLock};
 
 pub(crate) fn is_component(name: &str) -> bool {
     name.contains('-') || name.contains(|c: char| c.is_ascii_uppercase())
@@ -97,7 +97,7 @@ pub(crate) fn is_whitespace_sensitive_tag(name: &str, language: Language) -> boo
                         .iter()
                         .any(|tag| tag.eq_ignore_ascii_case(name))
         }
-        Language::Xml => true,
+        Language::Xml => false,
         _ => {
             name == "a"
                 || !NON_WS_SENSITIVE_TAGS.contains(&name)
@@ -196,7 +196,7 @@ pub(crate) fn pascal2kebab(s: &'_ str) -> Cow<'_, str> {
     {
         let mut result = String::with_capacity(s.len() + uppers);
         s.chars().fold('<', |prev, c| {
-            if c.is_ascii_uppercase() && prev.is_ascii_lowercase() {
+            if c.is_ascii_uppercase() && prev.is_ascii_alphanumeric() {
                 result.push('-');
             }
             result.push(c.to_ascii_lowercase());
@@ -226,5 +226,110 @@ pub(crate) fn kebab2pascal(s: &'_ str) -> Cow<'_, str> {
         Cow::from(result)
     } else {
         Cow::from(s)
+    }
+}
+
+pub(crate) fn has_template_interpolation(s: &str, language: Language) -> bool {
+    match language {
+        Language::Html | Language::Xml => false,
+        Language::Svelte | Language::Astro => s.contains('{'),
+        Language::Vue | Language::Angular => s.contains("{{"),
+        Language::Jinja | Language::Vento | Language::Mustache => {
+            s.contains("{{") || s.contains("{%")
+        }
+    }
+}
+
+static SPACE_SEPARATED_GLOBAL_ATTRIBUTES: [&str; 11] = [
+    "class",
+    "aria-labelledby",
+    "aria-describedby",
+    "aria-controls",
+    "aria-owns",
+    "aria-flowto",
+    "accesskey",
+    "itemtype",
+    "itemprop",
+    "itemref",
+    "accesskey",
+];
+/// Checks if the given attribute name content should be space-separated.
+///
+/// These were found using the HTML attribute list from the spec, cross-referencing MDN:
+/// - <https://html.spec.whatwg.org/multipage/indices.html#attributes-3>
+/// - <https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes>
+pub(crate) fn should_be_space_separated(attr_name: &str, tag_name: Option<&str>) -> bool {
+    if SPACE_SEPARATED_GLOBAL_ATTRIBUTES
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case(attr_name))
+    {
+        true
+    } else if attr_name.eq_ignore_ascii_case("rel") {
+        tag_name.is_some_and(|name| {
+            ["form", "a", "area", "link"]
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(name))
+        })
+    } else if attr_name.eq_ignore_ascii_case("blocking") {
+        tag_name.is_some_and(|name| {
+            ["link", "script", "style"]
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(name))
+        })
+    } else if attr_name.eq_ignore_ascii_case("for") {
+        tag_name.is_some_and(|name| name.eq_ignore_ascii_case("output"))
+    } else if attr_name.eq_ignore_ascii_case("headers") {
+        tag_name.is_some_and(|name| {
+            ["td", "th"]
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(name))
+        })
+    } else if attr_name.eq_ignore_ascii_case("autocomplete") {
+        tag_name.is_some_and(|name| {
+            ["form", "input", "select", "textarea"]
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(name))
+        })
+    } else if attr_name.eq_ignore_ascii_case("sandbox") {
+        tag_name.is_some_and(|name| name.eq_ignore_ascii_case("iframe"))
+    } else if attr_name.eq_ignore_ascii_case("accept-charset") {
+        tag_name.is_some_and(|name| name.eq_ignore_ascii_case("form"))
+    } else if attr_name.eq_ignore_ascii_case("ping") {
+        tag_name.is_some_and(|name| {
+            ["a", "area"]
+                .iter()
+                .any(|tag| tag.eq_ignore_ascii_case(name))
+        })
+    } else {
+        false
+    }
+}
+
+pub(crate) fn pos_to_line_col(source: &str, pos: usize) -> (usize, usize) {
+    let search = memchr::memchr_iter(b'\n', source.as_bytes()).try_fold(
+        (1, 0),
+        |(line, prev_offset), offset| match pos.cmp(&offset) {
+            Ordering::Less => ControlFlow::Break((line, prev_offset)),
+            Ordering::Equal => ControlFlow::Break((line, prev_offset)),
+            Ordering::Greater => ControlFlow::Continue((line + 1, offset)),
+        },
+    );
+    match search {
+        ControlFlow::Break((line, offset)) => (line, pos - offset + 1),
+        ControlFlow::Continue((line, _)) => (line, 0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pos_to_line_col() {
+        let source = "abc\ndef\nghi";
+        // Positions whose line is followed by a later newline go through the
+        // `Break` arm, which must report a non-zero column.
+        assert_eq!(super::pos_to_line_col(source, 0), (1, 1));
+        assert_eq!(super::pos_to_line_col(source, 2), (1, 3));
+        assert_eq!(super::pos_to_line_col(source, 4), (2, 2));
+        assert_eq!(super::pos_to_line_col(source, 6), (2, 4));
     }
 }

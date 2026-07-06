@@ -1,4 +1,5 @@
-use std::{borrow::Cow, error::Error, fmt};
+use anyhow::Error;
+use std::{borrow::Cow, fmt};
 
 #[derive(Clone, Debug)]
 /// Syntax error when parsing tags, not `<script>` or `<style>` tag.
@@ -11,8 +12,7 @@ pub struct SyntaxError {
 
 #[derive(Clone, Debug)]
 pub enum SyntaxErrorKind {
-    ExpectAngularFor,
-    ExpectAngularIf,
+    ExpectAngularBlock(&'static str),
     ExpectAngularLet,
     ExpectAngularSwitch,
     ExpectAstroAttr,
@@ -31,7 +31,11 @@ pub enum SyntaxErrorKind {
     ExpectElement,
     ExpectFrontMatter,
     ExpectIdentifier,
-    ExpectJinjaBlockEnd,
+    ExpectJinjaBlockEnd {
+        tag_name: String,
+        line: usize,
+        column: usize,
+    },
     ExpectJinjaTag,
     ExpectKeyword(&'static str),
     ExpectMustacheInterpolation,
@@ -59,8 +63,9 @@ pub enum SyntaxErrorKind {
 impl fmt::Display for SyntaxErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let reason: Cow<_> = match self {
-            SyntaxErrorKind::ExpectAngularFor => "expected Angular `@for`".into(),
-            SyntaxErrorKind::ExpectAngularIf => "expected Angular `@if`".into(),
+            SyntaxErrorKind::ExpectAngularBlock(keyword) => {
+                format!("expected Angular `@{keyword}` block").into()
+            }
             SyntaxErrorKind::ExpectAngularLet => "expected Angular `@let`".into(),
             SyntaxErrorKind::ExpectAngularSwitch => "expected Angular `@switch`".into(),
             SyntaxErrorKind::ExpectAstroAttr => "expected Astro attribute".into(),
@@ -82,7 +87,14 @@ impl fmt::Display for SyntaxErrorKind {
             SyntaxErrorKind::ExpectElement => "expected element".into(),
             SyntaxErrorKind::ExpectFrontMatter => "expected front matter".into(),
             SyntaxErrorKind::ExpectIdentifier => "expected identifier".into(),
-            SyntaxErrorKind::ExpectJinjaBlockEnd => "expected Jinja block end".into(),
+            SyntaxErrorKind::ExpectJinjaBlockEnd {
+                tag_name,
+                line,
+                column,
+            } => format!(
+                "expected end tag for opening Jinja block {{% {tag_name} %}} from line {line}, column {column}"
+            )
+            .into(),
             SyntaxErrorKind::ExpectJinjaTag => "expected Jinja tag".into(),
             SyntaxErrorKind::ExpectKeyword(keyword) => {
                 format!("expected keyword '{keyword}'").into()
@@ -125,22 +137,19 @@ impl fmt::Display for SyntaxError {
     }
 }
 
-impl Error for SyntaxError {}
+impl std::error::Error for SyntaxError {}
 
 #[derive(Debug)]
 /// The error type for markup_fmt.
-pub enum FormatError<E> {
+pub enum FormatError {
     /// Syntax error when parsing tags.
     Syntax(SyntaxError),
     /// Error from external formatter, for example,
     /// there're errors when formatting the `<script>` or `<style>` tag.
-    External(Vec<E>),
+    External(Vec<Error>),
 }
 
-impl<E> fmt::Display for FormatError<E>
-where
-    E: fmt::Display,
-{
+impl fmt::Display for FormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FormatError::Syntax(e) => e.fmt(f),
@@ -155,4 +164,4 @@ where
     }
 }
 
-impl<E> Error for FormatError<E> where E: Error {}
+impl std::error::Error for FormatError {}
